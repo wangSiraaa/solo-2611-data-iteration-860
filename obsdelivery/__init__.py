@@ -15,20 +15,28 @@ from .delivery import DeliveryService
 from .delivery_algo import ScaleAttempt, Selection, round_half_even, select_representation
 from .errors import (
     BatchRejected,
+    CatalogConflict,
+    CatalogNotFound,
     DeliveryIdConflict,
     DeliveryNotFound,
     DeliveryRejected,
     IntegrityError,
+    NotificationBatchConflict,
+    NotificationBatchNotFound,
     ProductConflict,
     ProductNotFound,
     ReferenceConflict,
     ReferenceNotFound,
     ReportConflict,
     ReportNotFound,
+    StopReconstructionNotFound,
     ValidationError,
 )
+from .faults import FaultCatalog, FaultMatch, FaultRule, resolve_payload
+from .notify import NotificationService
 from .semantics import decode, interpret, judge, parse_bits
 from .service import SemanticsService
+from .stoppages import solve as solve_stoppages
 from .storage import Store
 
 __all__ = [
@@ -39,21 +47,32 @@ __all__ = [
     "round_half_even",
     "select_representation",
     "BatchRejected",
+    "CatalogConflict",
+    "CatalogNotFound",
     "DeliveryIdConflict",
     "DeliveryNotFound",
     "DeliveryRejected",
     "IntegrityError",
+    "NotificationBatchConflict",
+    "NotificationBatchNotFound",
     "ProductConflict",
     "ProductNotFound",
     "ReferenceConflict",
     "ReferenceNotFound",
     "ReportConflict",
     "ReportNotFound",
+    "StopReconstructionNotFound",
     "ValidationError",
+    "FaultCatalog",
+    "FaultMatch",
+    "FaultRule",
+    "resolve_payload",
+    "NotificationService",
     "decode",
     "interpret",
     "judge",
     "parse_bits",
     "SemanticsService",
+    "solve_stoppages",
     "Store",
 ]

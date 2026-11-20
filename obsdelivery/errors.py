@@ -72,3 +72,23 @@ class DeliveryRejected(Exception):
 
 class IntegrityError(Exception):
     """Stored immutable content failed independent read-back verification."""
+
+
+class CatalogConflict(Exception):
+    """A fault-catalog version already exists with different immutable content."""
+
+
+class CatalogNotFound(KeyError):
+    pass
+
+
+class NotificationBatchConflict(Exception):
+    """A notification-batch id already exists with different immutable content."""
+
+
+class NotificationBatchNotFound(KeyError):
+    pass
+
+
+class StopReconstructionNotFound(KeyError):
+    pass

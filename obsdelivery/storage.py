@@ -157,6 +157,48 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
     reasons_json    TEXT NOT NULL,
     created_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS fault_catalog (
+    version         TEXT PRIMARY KEY,
+    model           TEXT,
+    rules_json      TEXT NOT NULL,
+    content_digest  TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_products (
+    product_id      TEXT PRIMARY KEY,
+    catalog_version TEXT NOT NULL REFERENCES fault_catalog(version),
+    notifications_json TEXT NOT NULL,
+    content_digest  TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notification_lines (
+    product_id      TEXT NOT NULL REFERENCES notification_products(product_id),
+    ordinal         INTEGER NOT NULL,
+    notification_id TEXT NOT NULL,
+    sample_id       TEXT NOT NULL,
+    revision        INTEGER NOT NULL,
+    channel         TEXT NOT NULL,
+    reading         INTEGER NOT NULL,
+    original_bits   TEXT NOT NULL,
+    payload         INTEGER,
+    retained_rules_json TEXT NOT NULL,
+    reasons_json    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    canonical_json  TEXT NOT NULL,
+    PRIMARY KEY (product_id, notification_id)
+);
+
+CREATE TABLE IF NOT EXISTS stop_reconstructions (
+    reconstruction_id TEXT PRIMARY KEY,
+    product_id        TEXT NOT NULL REFERENCES notification_products(product_id),
+    registrations_json TEXT NOT NULL,
+    result_json       TEXT NOT NULL,
+    content_digest    TEXT NOT NULL,
+    created_at        TEXT NOT NULL
+);
 """
 
 

@@ -23,7 +23,15 @@ from .errors import (
     ReportConflict,
     ValidationError,
 )
-from .public import public_delivery, verify_public_delivery
+from .public import (
+    public_delivery,
+    public_notifications,
+    public_reconstruction,
+    verify_public_delivery,
+    verify_public_notifications,
+    verify_public_reconstruction,
+)
+from .notify import NotificationService
 from .service import SemanticsService
 from .storage import Store
 
@@ -253,8 +261,115 @@ def run(input_path: Path, db_path: str | None = None) -> dict:
         }
     )
 
+    log["stoppages"] = _run_stoppage_contrasts(store)
+
     store.close()
     return log
+
+
+def _run_stoppage_contrasts(store: Store) -> dict:
+    """The three requirement contrasts plus an independent public re-check.
+
+    * c1/c2/c3 on three distinct headers, reasons {A,B}, {B,C}, {A,C}: every
+      pair merges but the whole batch needs two stoppages.
+    * the same product with a more specific rule making the third payload only
+      {B}: one stoppage with reason B explains everything.
+    * the fixed new product with c1 and c2 on the same header: two again.
+    """
+    notify = NotificationService(store)
+    # Three payloads -> the three pairwise reason sets.  The AC rule is wider
+    # (only bit 0 constrained) so a later exact rule can be *more specific*.
+    catalog_old = [
+        {"rule_id": "ab", "mask": 0x7FFFFF, "value": 0x400000, "reasons": ["A", "B"]},
+        {"rule_id": "bc", "mask": 0x7FFFFF, "value": 0x400002, "reasons": ["B", "C"]},
+        {"rule_id": "ac", "mask": 0x000001, "value": 0x000001, "reasons": ["A", "C"]},
+    ]
+    notify.publish_catalog("contradictions-old", catalog_old)
+    # A more specific rule for the odd third payload makes it only {B}.
+    catalog_new = catalog_old + [
+        {"rule_id": "b-only", "mask": 0x000003, "value": 0x000001, "reasons": ["B"]},
+    ]
+    notify.publish_catalog("contradictions-new", catalog_new)
+
+    payloads = {0x400000: "7fc00000", 0x400002: "7fc00002", 0x400005: "7fc00005"}
+
+    def batch(product_id, catalog_version, mapping):
+        notify.publish_notifications(
+            product_id,
+            catalog_version,
+            [
+                {
+                    "notification_id": nid,
+                    "sample_id": nid,
+                    "revision": 1,
+                    "channel": channel,
+                    "reading": 100,
+                    "bits": payloads[payload],
+                }
+                for nid, (channel, payload) in mapping.items()
+            ],
+        )
+
+    header3 = [
+        {"channel": "c1", "header": "h1", "delay_lo": 0, "delay_hi": 0},
+        {"channel": "c2", "header": "h2", "delay_lo": 0, "delay_hi": 0},
+        {"channel": "c3", "header": "h3", "delay_lo": 0, "delay_hi": 0},
+    ]
+    batch(
+        "product-old",
+        "contradictions-old",
+        {"n1": ("c1", 0x400000), "n2": ("c2", 0x400002), "n3": ("c3", 0x400005)},
+    )
+    old_result = notify.reconstruct("recon-old", "product-old", header3, ["A", "B", "C"])
+
+    batch(
+        "product-new",
+        "contradictions-new",
+        {"n1": ("c1", 0x400000), "n2": ("c2", 0x400002), "n3": ("c3", 0x400005)},
+    )
+    new_result = notify.reconstruct("recon-new", "product-new", header3, ["A", "B", "C"])
+
+    shared_header = [
+        {"channel": "c1", "header": "h1", "delay_lo": 0, "delay_hi": 0},
+        {"channel": "c2", "header": "h1", "delay_lo": 0, "delay_hi": 0},
+        {"channel": "c3", "header": "h2", "delay_lo": 0, "delay_hi": 0},
+    ]
+    shared_result = notify.reconstruct(
+        "recon-shared-header", "product-new", shared_header, ["A", "B", "C"]
+    )
+
+    public_doc = public_reconstruction(notify, "recon-old")
+    notifications_doc = public_notifications(notify, "product-old")
+    return {
+        "contrast_1_three_pairwise_mergeable": _recon_summary(old_result),
+        "contrast_2_more_specific_rule_one_b": _recon_summary(new_result),
+        "contrast_3_same_header_two_again": _recon_summary(shared_result),
+        "public_notification_problems": verify_public_notifications(notifications_doc),
+        "public_reconstruction_problems": verify_public_reconstruction(public_doc),
+    }
+
+
+def _recon_summary(result: dict) -> dict:
+    return {
+        "feasible": result["feasible"],
+        "min_stoppages": result["min_stoppages"],
+        "reason_counts": result["reason_counts"],
+        "witness": None
+        if result["witness"] is None
+        else {
+            "min_stoppages": result["witness"]["min_stoppages"],
+            "groups": [
+                {
+                    "stoppage_id": group["stoppage_id"],
+                    "reason": group["reason"],
+                    "time_witness": group["time_witness"],
+                    "time_interval": group["time_interval"],
+                    "notification_ids": group["notification_ids"],
+                }
+                for group in result["witness"]["groups"]
+            ],
+        },
+    }
 
 
 def _delivery_summary(delivery: dict) -> dict:
@@ -384,6 +499,37 @@ def _print_text(log: dict) -> None:
                   f"bits={step['s1_r2_bits']}")
         else:
             print(f"\n[{op}] {step}")
+
+    stoppages = log.get("stoppages")
+    if stoppages:
+        print("\n[stoppage reconstruction contrasts]")
+        for label in (
+            "contrast_1_three_pairwise_mergeable",
+            "contrast_2_more_specific_rule_one_b",
+            "contrast_3_same_header_two_again",
+        ):
+            summary = stoppages[label]
+            print(f"\n  {label}: min_stoppages={summary['min_stoppages']}")
+            for group in summary["witness"]["groups"]:
+                print(
+                    f"    stoppage {group['stoppage_id']}: reason={group['reason']} "
+                    f"time={group['time_witness']} "
+                    f"range={group['time_interval']} "
+                    f"notifications={group['notification_ids']}"
+                )
+            counts = ", ".join(
+                f"{reason}[{bounds['min']},{bounds['max']}]"
+                for reason, bounds in sorted(summary["reason_counts"].items())
+            )
+            print(f"    reason stoppage counts: {counts}")
+        print(
+            "\n  public notification problems="
+            f"{stoppages['public_notification_problems'] or 'none'}"
+        )
+        print(
+            "  public reconstruction problems="
+            f"{stoppages['public_reconstruction_problems'] or 'none'}"
+        )
 
 
 if __name__ == "__main__":
